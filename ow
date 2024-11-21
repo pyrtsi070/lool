@@ -1,0 +1,120 @@
+local connections = {} -- Store connections for cleanup
+local gui = nil -- Reference to the GUI
+local textBox = nil -- Reference to the log TextBox
+
+-- Create a GUI for the log display
+local function createLogWindow()
+    local player = game.Players.LocalPlayer
+    local playerGui = player:WaitForChild("PlayerGui")
+
+    -- Screen GUI
+    gui = Instance.new("ScreenGui")
+    gui.Name = "RemoteLoggerGui"
+    gui.Parent = playerGui
+
+    -- Frame
+    local frame = Instance.new("Frame")
+    frame.Name = "LogFrame"
+    frame.Size = UDim2.new(0.4, 0, 0.6, 0) -- 40% width, 60% height
+    frame.Position = UDim2.new(0.3, 0, 0.2, 0) -- Centered
+    frame.BackgroundColor3 = Color3.new(0, 0, 0)
+    frame.BorderSizePixel = 2
+    frame.BorderColor3 = Color3.new(1, 1, 1)
+    frame.Parent = gui
+
+    -- Scrolling TextBox
+    textBox = Instance.new("TextBox")
+    textBox.Name = "LogTextBox"
+    textBox.Size = UDim2.new(1, 0, 1, 0) -- Full size of the frame
+    textBox.BackgroundTransparency = 1
+    textBox.TextColor3 = Color3.new(1, 1, 1)
+    textBox.TextXAlignment = Enum.TextXAlignment.Left
+    textBox.TextYAlignment = Enum.TextYAlignment.Top
+    textBox.Font = Enum.Font.Code
+    textBox.TextSize = 14
+    textBox.ClearTextOnFocus = false
+    textBox.MultiLine = true
+    textBox.Text = "Remote Logger Initialized...\n"
+    textBox.Parent = frame
+
+    return textBox
+end
+
+-- Logs messages to the GUI
+local function logToGui(message)
+    if not textBox then return end
+    textBox.Text = textBox.Text .. message .. "\n"
+    textBox.Text = string.sub(textBox.Text, -2000) -- Truncate to prevent overflow
+    textBox.CursorPosition = #textBox.Text
+end
+
+-- Hook into RemoteFunction and RemoteEvent
+local function hookRemote(remote)
+    if remote:IsA("RemoteFunction") then
+        logToGui("[RemoteFunction] Detected: " .. remote.Name)
+
+        -- Hook invoke for RemoteFunction
+        remote.OnClientInvoke = function(...)
+            logToGui("[RemoteFunction] Invoked by client: " .. remote.Name)
+            logToGui("Arguments: " .. tostring(table.concat({...}, ", ")))
+            return nil -- Optionally return something to the server
+        end
+    elseif remote:IsA("RemoteEvent") then
+        logToGui("[RemoteEvent] Detected: " .. remote.Name)
+
+        -- Hook event for RemoteEvent
+        remote.OnClientEvent:Connect(function(...)
+            logToGui("[RemoteEvent] Triggered: " .. remote.Name)
+            logToGui("Arguments: " .. tostring(table.concat({...}, ", ")))
+        end)
+    end
+end
+
+-- Monitor remotes
+local function monitorRemotes()
+    textBox = createLogWindow()
+    local replicatedStorage = game:GetService("ReplicatedStorage")
+
+    -- Iterate through all current remotes
+    for _, obj in pairs(replicatedStorage:GetDescendants()) do
+        if obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent") then
+            hookRemote(obj)
+        end
+    end
+
+    -- Monitor new remotes as they are added
+    table.insert(connections, replicatedStorage.DescendantAdded:Connect(function(obj)
+        if obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent") then
+            logToGui("[New Remote Detected]: " .. obj.Name)
+            hookRemote(obj)
+        end
+    end))
+end
+
+-- Cleanup function to stop monitoring
+local function stopMonitoring()
+    -- Disconnect all connections
+    for _, conn in pairs(connections) do
+        conn:Disconnect()
+    end
+    connections = {}
+
+    -- Remove the GUI
+    if gui then
+        gui:Destroy()
+        gui = nil
+        textBox = nil
+    end
+
+    print("[Remote Logger] Stopped.")
+end
+
+-- Start monitoring
+monitorRemotes()
+
+-- Command to stop logging (optional for user)
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.F12 then -- Press F12 to stop monitoring
+        stopMonitoring()
+    end
+end)
